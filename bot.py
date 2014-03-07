@@ -1,32 +1,31 @@
 #!/usr/bin/python
 # -*- coding: utf-8 -*-
 
-# ipyxmpp: hack to have an IPython shell 
+# ipyxmpp: simple hack to have an IPython shell wrapped in a xmpp bot.
 
-#Copyright (c) 2014, Francesco 'redsh' Rossi
-#All rights reserved.
-
-#Redistribution and use in source and binary forms, with or without
-#modification, are permitted provided that the following conditions are met:
-#    * Redistributions of source code must retain the above copyright
-#      notice, this list of conditions and the following disclaimer.
-#    * Redistributions in binary form must reproduce the above copyright
-#      notice, this list of conditions and the following disclaimer in the
-#      documentation and/or other materials provided with the distribution.
-#    * Neither the name of the <organization> nor the
-#      names of its contributors may be used to endorse or promote products
-#      derived from this software without specific prior written permission.
+# Copyright (c) 2014, Francesco 'redsh' Rossi
+# All rights reserved.
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions are met:
+#     * Redistributions of source code must retain the above copyright
+#       notice, this list of conditions and the following disclaimer.
+#     * Redistributions in binary form must reproduce the above copyright
+#       notice, this list of conditions and the following disclaimer in the
+#       documentation and/or other materials provided with the distribution.
+#     * Neither the name of the <organization> nor the
+#       names of its contributors may be used to endorse or promote products
+#       derived from this software without specific prior written permission.
 #
-#THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
-#ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
-#WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
-#DISCLAIMED. IN NO EVENT SHALL <COPYRIGHT HOLDER> BE LIABLE FOR ANY
-#DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
-#(INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
-#LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
-#ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-#(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
-#SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+# ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+# WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+# DISCLAIMED. IN NO EVENT SHALL <COPYRIGHT HOLDER> BE LIABLE FOR ANY
+# DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+# (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+# LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
+# ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+# (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+# SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import sys,os,re
 from cStringIO import StringIO
@@ -39,7 +38,7 @@ import sleekxmpp
 import IPython
 from IPython.core.interactiveshell import InteractiveShell, InteractiveShellABC
 from IPython.terminal.interactiveshell import TerminalInteractiveShell
-from IPython.terminal.console.interactiveshell import ZMQTerminalInteractiveShell
+#from IPython.terminal.console.interactiveshell import ZMQTerminalInteractiveShell
 from IPython.utils.traitlets import (Integer, CBool, CaselessStrEnum, Enum,
                                      List, Unicode, Instance, Type)
 from IPython.config.configurable import Configurable
@@ -57,18 +56,16 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
-
+#Relays to the xmpp client
 class DummyPublishser(Configurable):
-
     def publish(self, source, data, metadata=None):
-        #print 'SOURCE,DATA',source, data
-        self.xmpp_service.publish(source,data,metadata)
+        self.xmpp_client.publish(source,data,metadata)
 
 class XMPPInteractiveShell(InteractiveShell):
     display_pub_class = Type(DummyPublishser)
     prompt_out = ''
 
-    def __init__(self, xmpp_service):
+    def __init__(self, xmpp_client):
 
         self.real_stdout = sys.stdout
         self.real_stderr = sys.stderr
@@ -79,10 +76,10 @@ class XMPPInteractiveShell(InteractiveShell):
         sys.stdout = self.stdout
         sys.stderr = self.stderr
 
-        import IPython.kernel.inprocess
         super(XMPPInteractiveShell,self).__init__()
+        
         InteractiveShell._instance = self
-        self.display_pub.xmpp_service = xmpp_service
+        self.display_pub.xmpp_client = xmpp_client
 
         self.prompt_manager.in_template = ''
         self.prompt_manager.in2_template = ''
@@ -99,7 +96,7 @@ class XMPPInteractiveShell(InteractiveShell):
 
         self.real_stdout.write( self.flush() )
     
-    def enable_gui(self,whu):
+    def enable_gui(self,gui):
         pass
 
     def flush(self):
@@ -117,11 +114,8 @@ class XMPPInteractiveShell(InteractiveShell):
 
     def put(self,line):
         try:
-            #print line
             self.input_splitter.push(line)
-            #print line
             more = self.input_splitter.push_accepts_more()
-            #print more
         except SyntaxError:
             more = False
 
@@ -133,37 +127,25 @@ class XMPPInteractiveShell(InteractiveShell):
             source_raw = self.input_splitter.raw_reset()
             ret = self.run_cell(source_raw, store_history=True)
 
-            #print '-----'
-
         return ret
 
 
 InteractiveShellABC.register(XMPPInteractiveShell)
 
+class IPyBot(sleekxmpp.ClientXMPP):
 
-class EchoBot(sleekxmpp.ClientXMPP):
-
-    """
-    A simple SleekXMPP bot that will echo messages it
-    receives, along with a short thank you message.
-    """
-
-    def __init__(self, jid, password):
+    def __init__(self, jid, password):        
         sleekxmpp.ClientXMPP.__init__(self, jid, password)
 
-        self.sh = XMPPInteractiveShell(self)
-        # The session_start event will be triggered when
-        # the bot establishes its connection with the server
-        # and the XML streams are ready for use. We want to
-        # listen for this event so that we we can initialize
-        # our roster.
         self.add_event_handler("session_start", self.start)
-
         self.add_event_handler("message", self.message)
 
         self.register_plugin('xep_0030')
         self.register_plugin('xep_0066') # OOB
         self.register_plugin('xep_0231') # BOB
+
+        self.sh = XMPPInteractiveShell(self)
+
 
     def start(self, event):
         self.send_presence()
@@ -254,6 +236,8 @@ if __name__ == '__main__':
                     help="JID to use")
     optp.add_option("-p", "--password", dest="password",
                     help="password to use")
+    optp.add_option("-s", "--server", dest="server",
+                    help="server hostname:port")
 
     opts, args = optp.parse_args()
 
@@ -266,26 +250,19 @@ if __name__ == '__main__':
     if opts.password is None:
         opts.password = getpass.getpass("Password: ")
 
-    xmpp = EchoBot(opts.jid, opts.password)
+    xmpp = IPyBot(opts.jid, opts.password)
     xmpp.register_plugin('xep_0030') # Service Discovery
     xmpp.register_plugin('xep_0004') # Data Forms
     xmpp.register_plugin('xep_0060') # PubSub
     xmpp.register_plugin('xep_0199') # XMPP Ping
     
     params = None
-    if opts.jid.endswith('gmail.com') and False:
+    if opts.jid.endswith('gmail.com'):
         params = ('talk.google.com', 5222)
+    if opts.server != '':
+        params = opts.server.split(':')
 
     if xmpp.connect(params):
-        # If you do not have the dnspython library installed, you will need
-        # to manually specify the name of the server if it does not match
-        # the one in the JID. For example, to use Google Talk you would
-        # need to use:
-        #
-        # if xmpp.connect(('talk.google.com', 5222)):
-        #     ...
-        xmpp.process(threaded=False)
-
-
+        xmpp.process(block=True)
 
 
