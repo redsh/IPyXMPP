@@ -144,16 +144,17 @@ class SimplePassphraseSecurity(object):
             return True
         elif self.allowed_jabberids.has_key(sender):
             return True
-        elif msg.body == passphrase:
+        elif msg['body'] == self.passphrase:
             self.allowed_jabberids[sender] = 1
+            msg.reply('Passphrase check passed. You can now enter IPython commands.').send()
             return False
         else:
-            msg.reply('Enter the passphrase please').send()
+            msg.reply('Enter the passphrase please.').send()
             return False
 
 class IPyBot(sleekxmpp.ClientXMPP):
 
-    def __init__(self, jid, security):        
+    def __init__(self, jid, password, security):        
         sleekxmpp.ClientXMPP.__init__(self, jid, password)
 
         self.add_event_handler("session_start", self.on_start)
@@ -209,7 +210,7 @@ class IPyBot(sleekxmpp.ClientXMPP):
         
         if not (msg['type'] in ('chat', 'normal')):
             return
-        if not self.security.is_authorized():
+        if not self.security.is_authorized(msg):
             return  
         
         self.last_from = msg['from']
@@ -269,7 +270,7 @@ if __name__ == '__main__':
     if opts.password is None:
         opts.password = getpass.getpass("Password: ")
 
-    xmpp = IPyBot(opts.jid, opts.password, SimplePassphraseSecurity(opts.chat_password))
+    xmpp = IPyBot(opts.jid, opts.password, SimplePassphraseSecurity(opts.passphrase))
     xmpp.register_plugin('xep_0030') # Service Discovery
     xmpp.register_plugin('xep_0004') # Data Forms
     xmpp.register_plugin('xep_0060') # PubSub
