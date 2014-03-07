@@ -269,7 +269,7 @@ if __name__ == '__main__':
     if opts.password is None:
         opts.password = getpass.getpass("Password: ")
 
-    xmpp = IPyBot(opts.jid, opts.password, SimplePassphraseSecurity(opt.chat_password))
+    xmpp = IPyBot(opts.jid, opts.password, SimplePassphraseSecurity(opts.chat_password))
     xmpp.register_plugin('xep_0030') # Service Discovery
     xmpp.register_plugin('xep_0004') # Data Forms
     xmpp.register_plugin('xep_0060') # PubSub
