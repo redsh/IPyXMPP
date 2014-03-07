@@ -132,22 +132,42 @@ class XMPPInteractiveShell(InteractiveShell):
 
 InteractiveShellABC.register(XMPPInteractiveShell)
 
+class SimplePassphraseSecurity(object):
+    def __init__(self,passphrase):
+        self.passphrase = passphrase
+        self.allowed_jabberids = {}
+
+    def is_authorized(self, msg):
+        sender = msg['from']
+
+        if self.passphrase == None:
+            return True
+        elif self.allowed_jabberids.has_key(sender):
+            return True
+        elif msg.body == passphrase:
+            self.allowed_jabberids[sender] = 1
+            return False
+        else:
+            msg.reply('Enter the passphrase please').send()
+            return False
+
 class IPyBot(sleekxmpp.ClientXMPP):
 
-    def __init__(self, jid, password):        
+    def __init__(self, jid, security):        
         sleekxmpp.ClientXMPP.__init__(self, jid, password)
 
-        self.add_event_handler("session_start", self.start)
-        self.add_event_handler("message", self.message)
+        self.add_event_handler("session_start", self.on_start)
+        self.add_event_handler("message", self.on_message)
 
         self.register_plugin('xep_0030')
         self.register_plugin('xep_0066') # OOB
         self.register_plugin('xep_0231') # BOB
 
         self.sh = XMPPInteractiveShell(self)
+        self.security = security
 
 
-    def start(self, event):
+    def on_start(self, event):
         self.send_presence()
         self.get_roster()
    
@@ -183,37 +203,34 @@ class IPyBot(sleekxmpp.ClientXMPP):
             else:
                 self.send_image_bob(self.last_from, data[k], k)
 
-    def message(self, msg):
-        self.sh.real_stdout.write(str(('incoming',msg)))
-        self.sh.real_stdout.write('\n')
+    def on_message(self, msg):
+        self.sh.real_stdout.write(str(('incoming',msg))+'\n')
+        self.sh.real_stdout.flush()
+        
+        if not (msg['type'] in ('chat', 'normal')):
+            return
+        if not self.security.is_authorized():
+            return  
+        
+        self.last_from = msg['from']
+        ret = self.sh.put("%(body)s"%msg)
+        
+        #get output text and clear term colors
+        x = self.sh.flush()
+        p = re.compile('\033\[([0-9]+);([0-9]+)m')
+        x = p.sub('',x)
+        x = x.replace('\033[0m','')
+        x = x.replace('\033','')
+
+        self.sh.real_stdout.write(x+'\n')
         self.sh.real_stdout.flush()
 
-        p = re.compile('\033\[([0-9]+);([0-9]+)m')
-
-        if msg['type'] in ('chat', 'normal'):
-            self.last_from = msg['from']
-            
-            ret = self.sh.put("%(body)s"%msg)
-
-            if isinstance(ret, matplotlib.figure.Figure):
-                print 'figure',dir(ret)
-            #
-            x = self.sh.flush()
-
-            x = p.sub('',x)
-            x = x.replace('\033[0m','')
-            x = x.replace('\033','')
-
-            self.sh.real_stdout.write(x)
-            self.sh.real_stdout.write('\n')
-            self.sh.real_stdout.flush()
-
-            m = self.Message()
-            m['to'] = self.last_from
-            m['type'] = 'chat'
-            m['body'] = x
-            #m['html']['body'] = '<p><span style="color: #ff0000;">'+x+'</span></p>'
-            m.send()
+        m = self.Message()
+        m['to'] = self.last_from
+        m['type'] = 'chat'
+        m['body'] = x
+        #m['html']['body'] = '<p><span style="color: #ff0000;">'+x+'</span></p>'
+        m.send()
 
 
 if __name__ == '__main__':
@@ -238,6 +255,8 @@ if __name__ == '__main__':
                     help="password to use")
     optp.add_option("-s", "--server", dest="server",
                     help="server hostname:port")
+    optp.add_option("-a", "--passphrase", dest="passphrase", default=None,
+                    help="Password that the XMPP peer has to enter in order to run IPython commands.")
 
     opts, args = optp.parse_args()
 
@@ -250,7 +269,7 @@ if __name__ == '__main__':
     if opts.password is None:
         opts.password = getpass.getpass("Password: ")
 
-    xmpp = IPyBot(opts.jid, opts.password)
+    xmpp = IPyBot(opts.jid, opts.password, SimplePassphraseSecurity(opt.chat_password))
     xmpp.register_plugin('xep_0030') # Service Discovery
     xmpp.register_plugin('xep_0004') # Data Forms
     xmpp.register_plugin('xep_0060') # PubSub
