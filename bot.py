@@ -57,15 +57,29 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
 #Relays to the xmpp client
+
+class MulticastIO():
+    def __init__(self, streams):
+        self.streams = streams
+
+    def write(self,what,*args,**kwargs):
+        for s in self.streams:
+            s.write(what,*args,**kwargs)
+
+    def flush(self):
+        for s in self.streams:
+            s.flush()
+
 class DummyPublishser(Configurable):
     def publish(self, source, data, metadata=None):
         self.xmpp_client.publish(source,data,metadata)
+
 
 class XMPPInteractiveShell(InteractiveShell):
     display_pub_class = Type(DummyPublishser)
     prompt_out = ''
 
-    def __init__(self, xmpp_client):
+    def __init__(self, xmpp_client, *args, **kwargs):
 
         self.real_stdout = sys.stdout
         self.real_stderr = sys.stderr
@@ -73,10 +87,10 @@ class XMPPInteractiveShell(InteractiveShell):
         self.stdout = StringIO()
         self.stderr = StringIO()
 
-        sys.stdout = self.stdout
-        sys.stderr = self.stderr
+        sys.stdout = MulticastIO((sys.stdout, self.stdout))
+        sys.stderr = MulticastIO((sys.stderr, self.stderr))
 
-        super(XMPPInteractiveShell,self).__init__()
+        super(XMPPInteractiveShell,self).__init__(*args,**kwargs)
         
         InteractiveShell._instance = self
         self.display_pub.xmpp_client = xmpp_client
@@ -85,17 +99,13 @@ class XMPPInteractiveShell(InteractiveShell):
         self.prompt_manager.in2_template = ''
         self.prompt_manager.out_template = ''
 
-
-        sys.stdout = self.real_stdout
-        sys.stderr = self.real_stderr
-
         self.enable_pylab('inline')#'inline')
-        
-        sys.stdout = self.stdout
+
+   
+    def __del__(self):
+        sys.stdout = self.real_stdout
         sys.stderr = self.stderr
 
-        self.real_stdout.write( self.flush() )
-    
     def enable_gui(self,gui):
         pass
 
@@ -124,7 +134,8 @@ class XMPPInteractiveShell(InteractiveShell):
             self.edit_syntax_error()
     
         if not more:
-            source_raw = self.input_splitter.raw_reset()
+            source_raw = self.input_splitter.source_raw
+            self.input_splitter.reset()
             ret = self.run_cell(source_raw, store_history=True)
 
         return ret
@@ -146,15 +157,15 @@ class SimplePassphraseSecurity(object):
             return True
         elif msg['body'] == self.passphrase:
             self.allowed_jabberids[sender] = 1
-            msg.reply('Passphrase check passed. You can now enter IPython commands.').send()
+            msg.reply(self.reply_prompt+'Passphrase check passed. You can now enter IPython commands.').send()
             return False
         else:
-            msg.reply('Enter the passphrase please.').send()
+            msg.reply(self.reply_prompt+'Enter the passphrase please.').send()
             return False
 
 class IPyBot(sleekxmpp.ClientXMPP):
 
-    def __init__(self, jid, password, security):        
+    def __init__(self, jid, password, security, reply_prompt='> ', *args, **kwargs):        
         sleekxmpp.ClientXMPP.__init__(self, jid, password)
 
         self.add_event_handler("session_start", self.on_start)
@@ -164,8 +175,11 @@ class IPyBot(sleekxmpp.ClientXMPP):
         self.register_plugin('xep_0066') # OOB
         self.register_plugin('xep_0231') # BOB
 
-        self.sh = XMPPInteractiveShell(self)
+        self.sh = XMPPInteractiveShell(self, *args, **kwargs)
         self.security = security
+
+        self.security.reply_prompt = reply_prompt
+        self.reply_prompt = reply_prompt
 
 
     def on_start(self, event):
@@ -178,6 +192,7 @@ class IPyBot(sleekxmpp.ClientXMPP):
         m['type'] = 'chat'
         
         cid = self['xep_0231'].set_bob(img, ctype)
+        m['body']=self.reply_prompt
         m['html']['body'] = '<img src="cid:%s" />' % cid
         #m['body'] = 'https://plus.google.com/photos/albums/p4kcrshcfkg4lc212julf58nd92794ek8?pid=5987987735848990258&amp;oid=109602992525348911397'
         #m['html']['body'] = '<img src="https://lh6.googleusercontent.com/-riwta-GT3d4/AAAAAAAAAAI/AAAAAAAAHj4/Qu6lGVwCfbY/s24-c-k-no/photo.jpg"/>'
@@ -199,40 +214,77 @@ class IPyBot(sleekxmpp.ClientXMPP):
                 m = self.Message()
                 m['to'] = self.last_from
                 m['type'] = 'chat'
-                m['body'] = data[k]
+                m['body'] = self.reply_prompt+data[k]
                 m.send()
             else:
                 self.send_image_bob(self.last_from, data[k], k)
 
+    #In case we want bots talking to each other
+    def do_run_reply_msg(self,msg):
+        #implement in subclasses
+        return False
+
     def on_message(self, msg):
-        self.sh.real_stdout.write(str(('incoming',msg))+'\n')
-        self.sh.real_stdout.flush()
+        logging.debug(str(('incoming',msg))+'\n')
         
         if not (msg['type'] in ('chat', 'normal')):
             return
         if not self.security.is_authorized(msg):
-            return  
+            return
+
+        src = "%(body)s"%msg
+
+        #In case we want bots talking to each other
+        if self.reply_prompt:
+            if (src).startswith(self.reply_prompt):
+                if not self.do_run_reply_msg(msg):
+                    return
+                else:
+                    src = src[len(self.reply_prompt):]
         
         self.last_from = msg['from']
-        ret = self.sh.put("%(body)s"%msg)
+        ret = self.sh.put(src)
         
-        #get output text and clear term colors
+        #Get output text and clear term colors
         x = self.sh.flush()
         p = re.compile('\033\[([0-9]+);([0-9]+)m')
         x = p.sub('',x)
         x = x.replace('\033[0m','')
         x = x.replace('\033','')
 
-        self.sh.real_stdout.write(x+'\n')
-        self.sh.real_stdout.flush()
+        self.send_message(self.last_from, self.reply_prompt+x)
 
+    def send_message(self, to_jid, body, html_body=None):
         m = self.Message()
-        m['to'] = self.last_from
+        m['to'] = to_jid
         m['type'] = 'chat'
-        m['body'] = x
-        #m['html']['body'] = '<p><span style="color: #ff0000;">'+x+'</span></p>'
+        m['body'] = body
+        if html_body:
+            m['html']['body'] = html_body
+
+        logging.debug(str(('sending',m))+'\n')
+        
         m.send()
 
+    def run(self):
+        self.process(block=True)
+
+def create_ipyxmpp_bot(jid,password,server,passphrase,cls=IPyBot,*args,**kwargs
+    ):
+    xmpp = cls(jid, password, SimplePassphraseSecurity(passphrase), *args, **kwargs)
+    xmpp.register_plugin('xep_0030') # Service Discovery
+    xmpp.register_plugin('xep_0004') # Data Forms
+    xmpp.register_plugin('xep_0060') # PubSub
+    xmpp.register_plugin('xep_0199') # XMPP Ping
+    
+    params = None
+    if jid.endswith('gmail.com'):
+        params = ('talk.google.com', 5222)
+    if server != '' and server:
+        params = server.split(':')
+
+    if xmpp.connect(params):
+        return xmpp
 
 if __name__ == '__main__':
     # Setup the command line arguments.
@@ -255,7 +307,7 @@ if __name__ == '__main__':
     optp.add_option("-p", "--password", dest="password",
                     help="password to use")
     optp.add_option("-s", "--server", dest="server",
-                    help="server hostname:port")
+                    help="server hostname:port", default=None)
     optp.add_option("-a", "--passphrase", dest="passphrase", default=None,
                     help="Password that the XMPP peer has to enter in order to run IPython commands.")
 
@@ -270,19 +322,6 @@ if __name__ == '__main__':
     if opts.password is None:
         opts.password = getpass.getpass("Password: ")
 
-    xmpp = IPyBot(opts.jid, opts.password, SimplePassphraseSecurity(opts.passphrase))
-    xmpp.register_plugin('xep_0030') # Service Discovery
-    xmpp.register_plugin('xep_0004') # Data Forms
-    xmpp.register_plugin('xep_0060') # PubSub
-    xmpp.register_plugin('xep_0199') # XMPP Ping
-    
-    params = None
-    if opts.jid.endswith('gmail.com'):
-        params = ('talk.google.com', 5222)
-    if opts.server != '':
-        params = opts.server.split(':')
-
-    if xmpp.connect(params):
-        xmpp.process(block=True)
-
+    xmpp = create_ipyxmpp_bot(opts.jid, opts.password, opts.server, opts.passphrase)
+    xmpp.run()
 
