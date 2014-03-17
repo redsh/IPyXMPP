@@ -4,7 +4,7 @@
 
 You can run IPython commands and see output plots just by chatting with the jabber id you configured IPyXMPP to use: no need for knowing hostnames or setting up ssh tunnels.
 
-It has been developed as a component for a monitoring tool (to be released soon) allowing real time remote interaction with data in long, parallel simulations.
+It has been developed as a component for a tool (to be released soon) for interacting in real time with the data being processed in some simulation codes. The tool will embed an IPython shell in C simulation codes and use its extraordinary features for real time data analysis. This XMPP bot has been written to provide the easiest possible access to the simplest commands.
 
 ![Image](doc/shot1.png?raw=true)
 
