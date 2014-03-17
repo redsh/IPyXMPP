@@ -1,6 +1,6 @@
 #IPyXMPP
 
-##### IPyXMPP is a chat bot serving an IPython shell over xmpp.
+##### IPyXMPP is a chat bot serving an IPython shell over XMPP.
 
 You can run IPython commands and see output plots just by chatting with the jabber id you configured IPyXMPP to use: no need for knowing hostnames or setting up ssh tunnels.
 
@@ -16,7 +16,7 @@ python bot.py --jid=\[your jabber id\] --password=\[<XMPP password\]  --passphra
 
 ### Supported clients:
 
-Both native and web-based XMPP clients can be used to chat with the IPython bot, but for being able to see plot images in the chat window, you need one supporting XEP-0231 (Adium, ...). The maximum size of images is determined by the max stanza size of the jabber server you are using.
+All native and web-based XMPP clients can be used to chat with the IPython bot, but in order to see plot images in the chat window, you need a client supporting XEP-0231 (Adium, ...). The maximum size of images is determined by the max stanza size supported by your XMPP server.
 
 
 ### TODOs:
